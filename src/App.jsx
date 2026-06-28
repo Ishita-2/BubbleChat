@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { initializeApp } from "firebase/app";
 import {
   getFirestore, collection, doc, setDoc, getDoc, getDocs,
   query, where, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc
-} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+} from "firebase/firestore";
 
 // ─── Firebase init ────────────────────────────────────────────────────────
 const firebaseConfig = {
