@@ -1,31 +1,23 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp, getApps } from "firebase/app";
 import {
-  getFirestore, initializeFirestore, persistentLocalCache,
-  collection, doc, setDoc, getDoc, getDocs,
-  query, where, orderBy, onSnapshot, addDoc, updateDoc
-} from "firebase/firestore";
+  getDatabase, ref, set, get, push, onValue, update, query,
+  orderByChild, equalTo, limitToLast
+} from "firebase/database";
 
 // ─── Firebase ─────────────────────────────────────────────────────────────
 const firebaseConfig = {
   apiKey: "AIzaSyB3sCIQ2YbXfxweb9FAHtYfE2JNi6FvbmY",
   authDomain: "bubblechat-bdb1b.firebaseapp.com",
   projectId: "bubblechat-bdb1b",
+  databaseURL: "https://bubblechat-ee3a3-default-rtdb.firebaseio.com",
   storageBucket: "bubblechat-bdb1b.firebasestorage.app",
   messagingSenderId: "1019693296630",
   appId: "1:1019693296630:web:e15acda3f36e752c4db5d7",
 };
 
 const firebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-let db;
-try {
-  db = initializeFirestore(firebaseApp, {
-    experimentalForceLongPolling: true,
-    useFetchStreams: false,
-  });
-} catch(e) {
-  db = getFirestore(firebaseApp);
-}
+const db = getDatabase(firebaseApp);
 
 // ─── Constants ────────────────────────────────────────────────────────────
 const MESSAGE_EFFECTS = [
@@ -58,10 +50,10 @@ const TEXT_EFFECTS = [
 
 const ACCENT_COLORS = ["#5B6CF0","#E85D75","#22C9A5","#F5A623","#9B59B6","#E67E22","#1ABC9C","#E74C3C"];
 
-function randomId() { return Math.random().toString(36).slice(2, 10); }
 function randomColor() { return ACCENT_COLORS[Math.floor(Math.random() * ACCENT_COLORS.length)]; }
 function getInitials(name) { return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2); }
 function mkThreadKey(a, b) { return [a, b].sort().join("_"); }
+function sanitize(str) { return str.replace(/[.#$[\]]/g, "_"); }
 
 let SESSION = null;
 
@@ -89,24 +81,20 @@ function ParticleEffect({ effect, onDone }) {
       spotlight: { count:40, colors:["#fffbe0","#fff0a0","#ffe060"], shapes:["circle"], gravity:0, life:100, spread:3 },
     };
     const cfg = configs[effect] || configs.confetti;
-    const cx = canvas.width / 2, cy = canvas.height / 2;
+    const cx = canvas.width/2, cy = canvas.height/2;
     for (let i = 0; i < cfg.count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = Math.random() * cfg.spread + 1;
+      const angle = Math.random()*Math.PI*2, speed = Math.random()*cfg.spread+1;
       particles.push({
-        x: cx+(Math.random()-0.5)*200,
-        y: effect==="rain"?Math.random()*canvas.height*0.3:cy+(Math.random()-0.5)*100,
-        vx: Math.cos(angle)*speed*(effect==="rain"?0.2:1),
-        vy: Math.sin(angle)*speed,
-        color: cfg.colors[Math.floor(Math.random()*cfg.colors.length)],
-        shape: cfg.shapes[Math.floor(Math.random()*cfg.shapes.length)],
-        life: cfg.life+Math.random()*30, maxLife: cfg.life+30,
-        size: Math.random()*8+3, rotation: Math.random()*Math.PI*2,
-        rotSpeed: (Math.random()-0.5)*0.2,
+        x:cx+(Math.random()-0.5)*200, y:effect==="rain"?Math.random()*canvas.height*0.3:cy+(Math.random()-0.5)*100,
+        vx:Math.cos(angle)*speed*(effect==="rain"?0.2:1), vy:Math.sin(angle)*speed,
+        color:cfg.colors[Math.floor(Math.random()*cfg.colors.length)],
+        shape:cfg.shapes[Math.floor(Math.random()*cfg.shapes.length)],
+        life:cfg.life+Math.random()*30, maxLife:cfg.life+30,
+        size:Math.random()*8+3, rotation:Math.random()*Math.PI*2, rotSpeed:(Math.random()-0.5)*0.2,
       });
     }
     function drawParticle(p) {
-      ctx.save(); ctx.globalAlpha = Math.max(0,p.life/p.maxLife);
+      ctx.save(); ctx.globalAlpha=Math.max(0,p.life/p.maxLife);
       ctx.fillStyle=p.color; ctx.strokeStyle=p.color;
       ctx.translate(p.x,p.y); ctx.rotate(p.rotation);
       switch(p.shape) {
@@ -142,7 +130,7 @@ function ParticleEffect({ effect, onDone }) {
       else onDone?.();
     }
     frame=requestAnimationFrame(animate);
-    return ()=>cancelAnimationFrame(frame);
+    return()=>cancelAnimationFrame(frame);
   },[effect]);
   if(!effect||effect==="none") return null;
   return <canvas ref={canvasRef} style={{position:"fixed",top:0,left:0,width:"100%",height:"100%",pointerEvents:"none",zIndex:9999}}/>;
@@ -150,8 +138,8 @@ function ParticleEffect({ effect, onDone }) {
 
 // ─── Animated Text ────────────────────────────────────────────────────────
 function AnimatedText({ text, effect }) {
-  const [tick, setTick] = useState(0);
-  const [typed, setTyped] = useState(effect==="typewriter"?0:text.length);
+  const [tick,setTick]=useState(0);
+  const [typed,setTyped]=useState(effect==="typewriter"?0:text.length);
   useEffect(()=>{
     if(!effect||effect==="none") return;
     const id=setInterval(()=>setTick(t=>t+1),50);
@@ -207,36 +195,36 @@ function AuthScreen({onLogin}){
   async function handleLogin(){
     setError("");setLoading(true);
     try{
-      if(!username.trim()||!password.trim()){setError("Enter your username and password.");return;}
-      const uname=username.trim().toLowerCase();
-      const ref=doc(db,"users",uname);
-      const snap=await getDoc(ref);
-      if(!snap.exists()){setError("No account found with that username.");return;}
-      if(snap.data().password!==password){setError("Wrong password.");return;}
-      const user={id:snap.id,...snap.data()};
-      SESSION=user;onLogin(user);
+      if(!username.trim()||!password.trim()){setError("Enter your username and password.");setLoading(false);return;}
+      const uname=sanitize(username.trim().toLowerCase());
+      const snap=await get(ref(db,`users/${uname}`));
+      if(!snap.exists()){setError("No account found with that username.");setLoading(false);return;}
+      const userData=snap.val();
+      if(userData.password!==password){setError("Wrong password.");setLoading(false);return;}
+      SESSION=userData;onLogin(userData);
     }catch(e){
       console.error(e);
-      setError("Connection error. Please check your internet and try again.");
-    }finally{setLoading(false);}
+      setError("Error: "+e.message);
+    }
+    setLoading(false);
   }
 
   async function handleSignup(){
     setError("");setLoading(true);
     try{
-      if(!name.trim()||!username.trim()||!password.trim()){setError("All fields are required.");return;}
-      if(password.length<4){setError("Password must be at least 4 characters.");return;}
-      const uname=username.trim().toLowerCase();
-      const ref=doc(db,"users",uname);
-      const existing=await getDoc(ref);
-      if(existing.exists()){setError("Username taken — try another.");return;}
+      if(!name.trim()||!username.trim()||!password.trim()){setError("All fields are required.");setLoading(false);return;}
+      if(password.length<4){setError("Password must be at least 4 characters.");setLoading(false);return;}
+      const uname=sanitize(username.trim().toLowerCase());
+      const snap=await get(ref(db,`users/${uname}`));
+      if(snap.exists()){setError("Username taken — try another.");setLoading(false);return;}
       const user={id:uname,name:name.trim(),username:uname,password,color:randomColor(),joinedAt:Date.now()};
-      await setDoc(ref,user);
+      await set(ref(db,`users/${uname}`),user);
       SESSION=user;onLogin(user);
     }catch(e){
       console.error(e);
-      setError("Connection error: "+e.message);
-    }finally{setLoading(false);}
+      setError("Error: "+e.message);
+    }
+    setLoading(false);
   }
 
   const inp={width:"100%",padding:"12px 14px",borderRadius:10,border:"1.5px solid #e0e0e0",
@@ -246,20 +234,18 @@ function AuthScreen({onLogin}){
     <div style={{minHeight:"100vh",background:"linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%)",
       display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"system-ui,sans-serif"}}>
       <style>{`
-        @keyframes float0{0%,100%{transform:translate(0,0)}50%{transform:translate(20px,-30px)}}
-        @keyframes float1{0%,100%{transform:translate(0,0)}50%{transform:translate(-15px,25px)}}
-        @keyframes float2{0%,100%{transform:translate(0,0)}50%{transform:translate(10px,-20px)}}
-        @keyframes float3{0%,100%{transform:translate(0,0)}50%{transform:translate(-20px,15px)}}
-        @keyframes float4{0%,100%{transform:translate(0,0)}50%{transform:translate(25px,-10px)}}
-        @keyframes float5{0%,100%{transform:translate(0,0)}50%{transform:translate(-10px,20px)}}
+        @keyframes f0{0%,100%{transform:translate(0,0)}50%{transform:translate(20px,-30px)}}
+        @keyframes f1{0%,100%{transform:translate(0,0)}50%{transform:translate(-15px,25px)}}
+        @keyframes f2{0%,100%{transform:translate(0,0)}50%{transform:translate(10px,-20px)}}
+        @keyframes f3{0%,100%{transform:translate(0,0)}50%{transform:translate(-20px,15px)}}
       `}</style>
       <div style={{position:"fixed",inset:0,overflow:"hidden",pointerEvents:"none"}}>
-        {[...Array(6)].map((_,i)=>(
+        {[...Array(4)].map((_,i)=>(
           <div key={i} style={{position:"absolute",
-            width:[300,200,250,180,320,150][i],height:[300,200,250,180,320,150][i],borderRadius:"50%",
-            background:["rgba(91,108,240,0.15)","rgba(232,93,117,0.1)","rgba(34,201,165,0.08)","rgba(91,108,240,0.12)","rgba(245,166,35,0.08)","rgba(155,89,182,0.1)"][i],
-            left:["10%","70%","30%","80%","5%","55%"][i],top:["10%","15%","60%","70%","80%","40%"][i],
-            animation:`float${i} ${[8,12,10,9,11,7][i]}s ease-in-out infinite`}}/>
+            width:[300,200,250,180][i],height:[300,200,250,180][i],borderRadius:"50%",
+            background:["rgba(91,108,240,0.15)","rgba(232,93,117,0.1)","rgba(34,201,165,0.08)","rgba(91,108,240,0.12)"][i],
+            left:["10%","70%","30%","80%"][i],top:["10%","15%","60%","70%"][i],
+            animation:`f${i} ${[8,12,10,9][i]}s ease-in-out infinite`}}/>
         ))}
       </div>
       <div style={{background:"rgba(255,255,255,0.97)",borderRadius:24,padding:"40px 36px",
@@ -358,13 +344,13 @@ function EffectPicker({selectedEffect,selectedTextEffect,onEffectChange,onTextEf
 }
 
 // ─── Message Bubble ───────────────────────────────────────────────────────
-function MessageBubble({msg,isOwn,senderUser}){
+function MessageBubble({msg,isOwn,senderUser,msgKey,threadKey}){
   const [showReact,setShowReact]=useState(false);
   const emojis=["❤️","😂","😮","😢","👍","🔥"];
   async function addReaction(emoji){
     setShowReact(false);
     const reactions={...(msg.reactions||{}),[emoji]:((msg.reactions||{})[emoji]||0)+1};
-    try{await updateDoc(doc(db,"messages",msg.id),{reactions});}catch{}
+    try{await update(ref(db,`messages/${threadKey}/${msgKey}`),{reactions});}catch{}
   }
   return(
     <div style={{display:"flex",flexDirection:isOwn?"row-reverse":"row",alignItems:"flex-end",gap:8,marginBottom:4}}>
@@ -388,7 +374,7 @@ function MessageBubble({msg,isOwn,senderUser}){
                 padding:"6px 10px",display:"flex",gap:6,zIndex:10,marginBottom:4}}>
                 {emojis.map(e=>(
                   <button type="button" key={e} onClick={()=>addReaction(e)}
-                    style={{background:"none",border:"none",cursor:"pointer",fontSize:18,padding:2,borderRadius:6}}>
+                    style={{background:"none",border:"none",cursor:"pointer",fontSize:18,padding:2}}>
                     {e}
                   </button>
                 ))}
@@ -406,7 +392,7 @@ function MessageBubble({msg,isOwn,senderUser}){
             ))}
           </div>
         )}
-        <div style={{fontSize:11,color:"#bbb",marginTop:3,textAlign:isOwn?"right":"left",paddingLeft:2,paddingRight:2}}>
+        <div style={{fontSize:11,color:"#bbb",marginTop:3,textAlign:isOwn?"right":"left"}}>
           {msg.at?new Date(msg.at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):""}
           {isOwn&&<span style={{marginLeft:4}}>✓</span>}
         </div>
@@ -429,11 +415,15 @@ function ConversationView({currentUser,contact,onBack}){
   const tk=mkThreadKey(currentUser.id,contact.id);
 
   useEffect(()=>{
-    const q=query(collection(db,"messages"),where("threadKey","==",tk),orderBy("at","asc"));
-    const unsub=onSnapshot(q,snap=>{
-      setMessages(snap.docs.map(d=>({id:d.id,...d.data()})));
+    const msgsRef=ref(db,`messages/${tk}`);
+    const unsub=onValue(msgsRef,snap=>{
+      if(!snap.exists()){setMessages([]);return;}
+      const data=snap.val();
+      const list=Object.entries(data).map(([key,val])=>({...val,_key:key}));
+      list.sort((a,b)=>a.at-b.at);
+      setMessages(list);
     });
-    return unsub;
+    return()=>unsub();
   },[tk]);
 
   useEffect(()=>{endRef.current?.scrollIntoView({behavior:"smooth"});},[messages,isTyping]);
@@ -443,7 +433,7 @@ function ConversationView({currentUser,contact,onBack}){
     const sentText=text.trim();
     setText("");
     const msgData={threadKey:tk,senderId:currentUser.id,text:sentText,effect,textEffect,at:Date.now(),reactions:{}};
-    await addDoc(collection(db,"messages"),msgData);
+    await push(ref(db,`messages/${tk}`),msgData);
     if(effect!=="none") setActiveEffect(effect);
     setEffect("none");setTextEffect("none");
     setIsTyping(true);
@@ -464,13 +454,13 @@ function ConversationView({currentUser,contact,onBack}){
       const data=await response.json();
       const replyText=data.content?.[0]?.text||"😄";
       const replyEffects=["none","none","none","none","wiggle","wave","bounce","rainbow","none"];
-      await addDoc(collection(db,"messages"),{
+      await push(ref(db,`messages/${tk}`),{
         threadKey:tk,senderId:contact.id,
         text:replyText,effect:"none",
         textEffect:replyEffects[Math.floor(Math.random()*replyEffects.length)],
         at:Date.now()+100,reactions:{}
       });
-    }catch{}
+    }catch(e){console.error(e);}
     finally{setIsTyping(false);}
   }
 
@@ -500,11 +490,11 @@ function ConversationView({currentUser,contact,onBack}){
           const showDate=!prev||new Date(msg.at).toDateString()!==new Date(prev.at).toDateString();
           const senderUser=msg.senderId===currentUser.id?currentUser:contact;
           return(
-            <div key={msg.id}>
+            <div key={msg._key}>
               {showDate&&<div style={{textAlign:"center",color:"#ccc",fontSize:12,margin:"12px 0 8px"}}>
                 {new Date(msg.at).toLocaleDateString([],{weekday:"short",month:"short",day:"numeric"})}
               </div>}
-              <MessageBubble msg={msg} isOwn={isOwn} senderUser={senderUser}/>
+              <MessageBubble msg={msg} isOwn={isOwn} senderUser={senderUser} msgKey={msg._key} threadKey={tk}/>
             </div>
           );
         })}
@@ -540,7 +530,7 @@ function ConversationView({currentUser,contact,onBack}){
           <button type="button" onClick={()=>setShowEffects(s=>!s)} style={{
             background:showEffects?"#f0f1ff":"#f5f5f7",border:"none",borderRadius:20,
             padding:"8px 12px",cursor:"pointer",fontSize:18,flexShrink:0,
-            color:showEffects?"#5B6CF0":"#555"}} title="Add effects">✨</button>
+            color:showEffects?"#5B6CF0":"#555"}}>✨</button>
           <textarea value={text} onChange={e=>setText(e.target.value)}
             onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMessage();}}}
             placeholder="Message…" rows={1}
@@ -568,19 +558,22 @@ function PeopleScreen({currentUser,onOpenChat}){
   const [lastMessages,setLastMessages]=useState({});
 
   useEffect(()=>{
-    getDocs(collection(db,"users")).then(snap=>{
-      setAllUsers(snap.docs.map(d=>({id:d.id,...d.data()})).filter(u=>u.id!==currentUser.id));
+    const unsub=onValue(ref(db,"users"),snap=>{
+      if(!snap.exists()){setAllUsers([]);return;}
+      const list=Object.values(snap.val()).filter(u=>u.id!==currentUser.id);
+      setAllUsers(list);
     });
+    return()=>unsub();
   },[currentUser.id]);
 
   useEffect(()=>{
     if(allUsers.length===0) return;
     const unsubs=allUsers.map(u=>{
       const tk=mkThreadKey(currentUser.id,u.id);
-      const q=query(collection(db,"messages"),where("threadKey","==",tk),orderBy("at","desc"));
-      return onSnapshot(q,snap=>{
-        const last=snap.docs[0];
-        setLastMessages(prev=>({...prev,[u.id]:last?{id:last.id,...last.data()}:null}));
+      return onValue(ref(db,`messages/${tk}`),snap=>{
+        if(!snap.exists()){setLastMessages(prev=>({...prev,[u.id]:null}));return;}
+        const msgs=Object.values(snap.val()).sort((a,b)=>b.at-a.at);
+        setLastMessages(prev=>({...prev,[u.id]:msgs[0]||null}));
       });
     });
     return()=>unsubs.forEach(u=>u());
@@ -608,8 +601,7 @@ function PeopleScreen({currentUser,onOpenChat}){
           {["chats","people"].map(t=>(
             <button type="button" key={t} onClick={()=>setTab(t)} style={{
               flex:1,padding:"8px 0",border:"none",background:"none",cursor:"pointer",
-              fontWeight:tab===t?700:400,fontSize:14,
-              color:tab===t?"#5B6CF0":"#aaa",
+              fontWeight:tab===t?700:400,fontSize:14,color:tab===t?"#5B6CF0":"#aaa",
               borderBottom:tab===t?"2px solid #5B6CF0":"2px solid transparent"}}>
               {t==="chats"?"Chats":"All People"}
             </button>
@@ -620,7 +612,7 @@ function PeopleScreen({currentUser,onOpenChat}){
         {list.length===0&&(
           <div style={{textAlign:"center",color:"#bbb",paddingTop:60}}>
             <div style={{fontSize:40,marginBottom:10}}>{tab==="chats"?"💬":"👥"}</div>
-            <div style={{fontSize:14}}>
+            <div style={{fontSize:14,padding:"0 20px"}}>
               {tab==="chats"?"No chats yet — go to People to start one!":"No other users yet. Share the link so friends can sign up!"}
             </div>
           </div>
@@ -658,9 +650,12 @@ function PeopleScreen({currentUser,onOpenChat}){
 function ProfileScreen({currentUser,onLogout}){
   const [stats,setStats]=useState({sent:0,effects:0,textFx:0});
   useEffect(()=>{
-    getDocs(query(collection(db,"messages"),where("senderId","==",currentUser.id))).then(snap=>{
-      const msgs=snap.docs.map(d=>d.data());
-      setStats({sent:msgs.length,effects:msgs.filter(m=>m.effect!=="none").length,textFx:msgs.filter(m=>m.textEffect!=="none").length});
+    get(ref(db,"messages")).then(snap=>{
+      if(!snap.exists()) return;
+      const all=[];
+      Object.values(snap.val()).forEach(thread=>Object.values(thread).forEach(m=>all.push(m)));
+      const mine=all.filter(m=>m.senderId===currentUser.id);
+      setStats({sent:mine.length,effects:mine.filter(m=>m.effect!=="none").length,textFx:mine.filter(m=>m.textEffect!=="none").length});
     });
   },[currentUser.id]);
   return(
