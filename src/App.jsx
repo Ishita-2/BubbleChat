@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { initializeApp, getApps } from "firebase/app";
 import {
-  getFirestore, enableNetwork, disableNetwork,
+  getFirestore, initializeFirestore, persistentLocalCache,
   collection, doc, setDoc, getDoc, getDocs,
   query, where, orderBy, onSnapshot, addDoc, updateDoc
 } from "firebase/firestore";
@@ -17,8 +17,15 @@ const firebaseConfig = {
 };
 
 const firebaseApp = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-const db = getFirestore(firebaseApp);
-enableNetwork(db).catch(() => {});
+let db;
+try {
+  db = initializeFirestore(firebaseApp, {
+    experimentalForceLongPolling: true,
+    useFetchStreams: false,
+  });
+} catch(e) {
+  db = getFirestore(firebaseApp);
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────
 const MESSAGE_EFFECTS = [
