@@ -413,6 +413,7 @@ function ConversationView({currentUser,contact,onBack}){
   const [isTyping,setIsTyping]=useState(false);
   const endRef=useRef();
   const tk=mkThreadKey(currentUser.id,contact.id);
+  const lastKeyRef=useRef(null);
 
   useEffect(()=>{
     const msgsRef=ref(db,`messages/${tk}`);
@@ -422,6 +423,16 @@ function ConversationView({currentUser,contact,onBack}){
       const list=Object.entries(data).map(([key,val])=>({...val,_key:key}));
       list.sort((a,b)=>a.at-b.at);
       setMessages(list);
+      // Trigger effect on receiver screen when a new message arrives with one
+      const latest=list[list.length-1];
+      if(latest && latest._key !== lastKeyRef.current){
+        lastKeyRef.current=latest._key;
+        // Only trigger if sender is NOT current user (i.e. we are receiving it)
+        // AND the message has an effect
+        if(latest.senderId !== currentUser.id && latest.effect && latest.effect !== "none"){
+          setActiveEffect(latest.effect);
+        }
+      }
     });
     return()=>unsub();
   },[tk]);
